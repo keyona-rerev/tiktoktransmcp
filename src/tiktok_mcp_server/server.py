@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from fastmcp import FastMCP
 
-from tiktok_mcp_server import config, tiktok
+from tiktok_mcp_server import apify, config, tiktok
 
 mcp = FastMCP("TikTok MCP Server")
 
@@ -118,6 +118,70 @@ def get_creator_info(handle: str) -> str:
         return _error(exc)
 
 
+@mcp.tool()
+def get_comments(
+    video_url: str,
+    limit: int = 50,
+    include_replies: bool = False,
+) -> str:
+    """Read the comments on a TikTok video.
+
+    Returns each comment with its author, like count, reply count, and
+    timestamp, newest data first from TikTok's own ranking.
+
+    This is the one tool here that costs money. It runs through Apify rather
+    than yt-dlp, which cannot read TikTok comments at all. Keep limit modest
+    and leave include_replies off unless the reply threads are the point.
+    """
+    try:
+        comments = apify.get_comments(video_url, limit, include_replies)
+    except Exception as exc:
+        return _error(exc)
+    return json.dumps(
+        {
+            "count": len(comments),
+            "comments": [asdict(c) for c in comments],
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+def get_hashtag_videos(tag: str, limit: int = 20) -> str:
+    """List videos posted under a hashtag.
+
+    Accepts the tag with or without a leading #. TikTok throttles list
+    requests, so an empty result usually means TikTok refused rather than
+    that the tag is empty.
+    """
+    try:
+        return _dump(tiktok.get_hashtag_videos(tag, limit))
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_sound_videos(sound_url: str, limit: int = 20) -> str:
+    """List videos that use a sound.
+
+    Takes the full TikTok music URL, since the numeric id at the end of it is
+    what identifies the sound. Two sounds can share a title.
+    """
+    try:
+        return _dump(tiktok.get_sound_videos(sound_url, limit))
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_collection_videos(collection_url: str, limit: int = 20) -> str:
+    """List the videos in a creator's public collection."""
+    try:
+        return _dump(tiktok.get_collection_videos(collection_url, limit))
+    except Exception as exc:
+        return _error(exc)
+
+
 class _TokenGate:
     """ASGI middleware that requires a shared secret on every HTTP request.
 
@@ -185,6 +249,16 @@ def main():
             port = int(sys.argv[idx + 1])
 
     print(f"yt-dlp: {yt_dlp.version.__version__}", file=sys.stderr, flush=True)
+
+    if config.apify_token():
+        print(f"comments: on ({config.apify_actor()})", file=sys.stderr, flush=True)
+    else:
+        print(
+            f"comments: off — set {config.APIFY_TOKEN_ENV} to enable "
+            f"get_comments. Every other tool works without it.",
+            file=sys.stderr,
+            flush=True,
+        )
 
     app = mcp.http_app(path="/mcp")
     token = config.auth_token()
