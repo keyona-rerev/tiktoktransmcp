@@ -45,6 +45,21 @@ class Video:
 
 
 @dataclass
+class Comment:
+    """One comment on a TikTok video."""
+
+    id: str
+    text: str
+    author: str = ""
+    author_url: str = ""
+    likes: int | None = None
+    reply_count: int | None = None
+    created_at: str = ""
+    is_reply: bool = False
+    reply_to_id: str | None = None
+
+
+@dataclass
 class Creator:
     """A TikTok account."""
 
