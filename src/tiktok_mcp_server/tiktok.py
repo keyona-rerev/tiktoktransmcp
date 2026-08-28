@@ -52,8 +52,11 @@ class TranscriptUnavailable(Exception):
     """Raised when a video has no usable caption track."""
 
 
-def _require_tiktok_url(url: str) -> str:
+def require_tiktok_url(url: str) -> str:
     """Reject any URL that is not on a TikTok host.
+
+    Public because the Apify comment path needs the same guard. A URL reaching
+    that code unchecked would let a caller aim a paid API at any host.
 
     Without this, a URL argument reaches yt-dlp's generic extractor and the
     server becomes an open fetcher for arbitrary hosts, including internal
@@ -70,7 +73,7 @@ def _require_tiktok_url(url: str) -> str:
 def _normalize_creator_url(handle_or_url: str) -> str:
     """Turn a handle or URL into a full creator URL."""
     if handle_or_url.startswith("http"):
-        return _require_tiktok_url(handle_or_url).rstrip("/")
+        return require_tiktok_url(handle_or_url).rstrip("/")
     handle = handle_or_url if handle_or_url.startswith("@") else f"@{handle_or_url}"
     return f"https://www.tiktok.com/{handle}"
 
@@ -99,7 +102,7 @@ def _as_video(info: dict) -> Video:
 
 def get_video_info(video_url: str) -> Video:
     """Get details about a single TikTok video."""
-    _require_tiktok_url(video_url)
+    require_tiktok_url(video_url)
     with yt_dlp.YoutubeDL(_BASE_OPTS) as ydl:
         info = ydl.extract_info(video_url, download=False)
     return _as_video(info)
@@ -155,7 +158,7 @@ def get_creator_info(handle_or_url: str) -> Creator:
 
 def get_transcript(video_url: str, language: str = "en") -> list[TranscriptSegment]:
     """Get the caption transcript of a TikTok video."""
-    _require_tiktok_url(video_url)
+    require_tiktok_url(video_url)
 
     with yt_dlp.YoutubeDL(_BASE_OPTS) as ydl:
         info = ydl.extract_info(video_url, download=False)
@@ -234,6 +237,72 @@ def search_creator_transcripts(
             if len(results) >= 15:
                 break
     return results[:15]
+
+
+def _flat_list(url: str, limit: int) -> list[Video]:
+    """Pull a flat list of videos from any TikTok listing page.
+
+    Flat keeps this to one request. Entries carry ids and URLs but no caption
+    data, so call get_video_info or get_transcript on the ones worth reading.
+    """
+    opts = {
+        **_BASE_OPTS,
+        "extract_flat": True,
+        "playlistend": max(1, min(limit, 100)),
+        "ignoreerrors": True,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    if not info:
+        raise ValueError(
+            "TikTok returned nothing for that listing. The tag, sound, or "
+            "collection may not exist, or TikTok may be refusing list "
+            "requests right now."
+        )
+
+    videos = []
+    for entry in (info.get("entries") or [])[:limit]:
+        if not entry:
+            continue
+        videos.append(
+            Video(
+                id=str(entry.get("id", "")),
+                title=entry.get("title") or entry.get("description") or "",
+                url=entry.get("webpage_url") or entry.get("url") or "",
+                creator=entry.get("uploader") or entry.get("channel") or "",
+                duration=entry.get("duration"),
+                view_count=entry.get("view_count"),
+                like_count=entry.get("like_count"),
+                thumbnail=entry.get("thumbnail") or "",
+            )
+        )
+    return videos
+
+
+def get_hashtag_videos(tag: str, limit: int = 20) -> list[Video]:
+    """List videos posted under a hashtag."""
+    tag = tag.lstrip("#").strip()
+    if not tag:
+        raise ValueError("A hashtag is required.")
+    return _flat_list(f"https://www.tiktok.com/tag/{tag}", limit)
+
+
+def get_sound_videos(sound_url: str, limit: int = 20) -> list[Video]:
+    """List videos using a sound.
+
+    Takes the full music URL rather than a name, because TikTok identifies a
+    sound by the numeric id at the end of that URL and two sounds can share a
+    title.
+    """
+    require_tiktok_url(sound_url)
+    return _flat_list(sound_url, limit)
+
+
+def get_collection_videos(collection_url: str, limit: int = 20) -> list[Video]:
+    """List videos in a creator's public collection."""
+    require_tiktok_url(collection_url)
+    return _flat_list(collection_url, limit)
 
 
 def _pick_track(info: dict, language: str) -> list[dict] | None:
