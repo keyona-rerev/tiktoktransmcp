@@ -5,3 +5,7 @@
 
 fastmcp>=2.0.0
 yt-dlp[default,curl-cffi]>=2026.8.27
+
+# Pulled in by fastmcp already. Named here because the Apify comment client
+# imports it directly, and a transitive dependency is not a promise.
+httpx>=0.27
