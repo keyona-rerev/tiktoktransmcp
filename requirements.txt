@@ -1,0 +1,7 @@
+# Nightly yt-dlp. TikTok and YouTube change often, and nightly carries the
+# fixes ahead of stable. The YouTube build hit a stable-release bug that cost
+# an afternoon; pinning nightly from the start avoids repeating it.
+--pre
+
+fastmcp>=2.0.0
+yt-dlp[default,curl-cffi]>=2026.8.27
